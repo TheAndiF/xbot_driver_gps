@@ -84,6 +84,25 @@ namespace xbot {
                     double gx,gy,gz;
                 };
 
+                struct SatelliteInfo {
+                    uint8_t gnss_id;
+                    uint8_t sv_id;
+                    bool used;
+                    uint8_t cno;
+                    int8_t elev;
+                    int16_t azim;
+                    int16_t pr_res;
+                    uint8_t quality_ind;
+                    uint32_t flags;
+                };
+
+                struct SatelliteState {
+                    uint32_t sensor_time;
+                    uint32_t received_time;
+                    uint8_t num_svs;
+                    std::vector<SatelliteInfo> satellites;
+                };
+
                 enum Mode {
                     ABSOLUTE = 1,
                     RELATIVE = 2
@@ -91,6 +110,7 @@ namespace xbot {
 
                 typedef std::function<void(const GpsState &new_state)> StateCallback;
                 typedef std::function<void(const ImuState &new_state)> ImuCallback;
+                typedef std::function<void(const SatelliteState &new_state)> SatelliteCallback;
 
 
 
@@ -98,6 +118,7 @@ namespace xbot {
                 void set_device(GpsDevice *device);
                 void set_imu_callback(const GpsInterface::ImuCallback &function);
                 void set_state_callback(const GpsInterface::StateCallback &function);
+                void set_satellite_callback(const GpsInterface::SatelliteCallback &function);
                 void set_log_function(const LogFunction &function);
 
                 void set_datum(double datum_lat, double datum_long, double datum_height);
@@ -114,6 +135,7 @@ namespace xbot {
             protected:
                 StateCallback state_callback = nullptr;
                 ImuCallback imu_callback = nullptr;
+                SatelliteCallback satellite_callback = nullptr;
                 LogFunction log = nullptr;
 
                 // Operation mode
@@ -129,6 +151,7 @@ namespace xbot {
                 bool gps_state_valid_;
                 GpsState gps_state_;
                 ImuState imu_state_;
+                SatelliteState satellite_state_;
 
 
                 // buffer to store ubx messages before parsing

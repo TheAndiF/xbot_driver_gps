@@ -27,10 +27,15 @@ namespace xbot {
                 imu_callback = function;
             }
 
+            void GpsInterface::set_satellite_callback(const GpsInterface::SatelliteCallback &function) {
+                satellite_callback = function;
+            }
+
             GpsInterface::GpsInterface() {
                 datum_n_ = datum_e_ = datum_u_ = NAN;
                 state_callback = nullptr;
                 imu_callback = nullptr;
+                satellite_callback = nullptr;
                 read_from_file_ = false;
             }
 

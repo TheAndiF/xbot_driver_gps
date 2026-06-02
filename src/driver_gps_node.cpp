@@ -11,6 +11,8 @@
 #include "xbot_msgs/WheelTick.h"
 #include "geometry_msgs/PoseWithCovariance.h"
 #include "xbot_msgs/AbsolutePose.h"
+#include "xbot_msgs/GnssSatelliteArray.h"
+#include "xbot_msgs/GnssSatellite.h"
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 #include "std_msgs/UInt32.h"
@@ -34,6 +36,7 @@ ros::Publisher latency_pub2;
 ros::Publisher latency_pub3;
 ros::Publisher imu_pub;
 ros::Publisher vrs_nmea_pub;
+ros::Publisher satellites_pub;
 
 bool isUbxInterface = false;
 GpsInterface *gpsInterface;
@@ -199,6 +202,47 @@ void gps_state_received(const GpsInterface::GpsState &state) {
     generate_nmea(state.pos_lat, state.pos_lon);
 }
 
+
+std::string gnss_name(uint8_t gnss_id) {
+    switch (gnss_id) {
+        case 0: return "GPS";
+        case 1: return "SBAS";
+        case 2: return "Galileo";
+        case 3: return "BeiDou";
+        case 4: return "IMES";
+        case 5: return "QZSS";
+        case 6: return "GLONASS";
+        case 7: return "NavIC";
+        default: return "GNSS_" + std::to_string(gnss_id);
+    }
+}
+
+void satellite_state_received(const GpsInterface::SatelliteState &state) {
+    xbot_msgs::GnssSatelliteArray msg;
+    msg.header.stamp = ros::Time::now();
+    msg.header.frame_id = "gps";
+    msg.sensor_stamp = state.sensor_time;
+    msg.num_svs = state.num_svs;
+    msg.satellites.reserve(state.satellites.size());
+
+    for (const auto &sat : state.satellites) {
+        xbot_msgs::GnssSatellite entry;
+        entry.gnss_id = sat.gnss_id;
+        entry.gnss = gnss_name(sat.gnss_id);
+        entry.sv_id = sat.sv_id;
+        entry.used = sat.used;
+        entry.cno = sat.cno;
+        entry.elev = sat.elev;
+        entry.azim = sat.azim;
+        entry.pr_res = sat.pr_res;
+        entry.quality_ind = sat.quality_ind;
+        entry.flags = sat.flags;
+        msg.satellites.push_back(entry);
+    }
+
+    satellites_pub.publish(msg);
+}
+
 void
 wheel_latency_received(uint32_t wheel_tick_stamp, uint32_t wheel_tick_stamp_ublox,
                        uint32_t wheel_tick_round_trip_stamp) {
@@ -330,6 +374,11 @@ int main(int argc, char **argv) {
     xbot_pose_pub = paramNh.advertise<xbot_msgs::AbsolutePose>("xb_pose", 10);
     imu_pub = paramNh.advertise<sensor_msgs::Imu>("imu", 10);
 
+    if (paramNh.param("publish_satellites", true) && chosen_protocol == "UBX") {
+        satellites_pub = paramNh.advertise<xbot_msgs::GnssSatelliteArray>("satellites", 10);
+        gpsInterface->set_satellite_callback(satellite_state_received);
+        ROS_INFO_STREAM("GPS satellite diagnostics enabled on private topic '~satellites'");
+    }
 
     gpsInterface->set_state_callback(gps_state_received);
 

@@ -80,6 +80,29 @@ namespace xbot {
                 int16_t magDec;
                 uint16_t magAcc;
             } __attribute__((packed));
+
+            struct UbxNavSatHeader {
+                enum {
+                    CLASS_ID = 1u,
+                    MESSAGE_ID = 0x35u
+                };
+
+                uint32_t iTOW;
+                uint8_t version;
+                uint8_t numSvs;
+                uint16_t reserved1;
+            } __attribute__((packed));
+
+            struct UbxNavSatSv {
+                uint8_t gnssId;
+                uint8_t svId;
+                uint8_t cno;
+                int8_t elev;
+                int16_t azim;
+                int16_t prRes;
+                uint32_t flags;
+            } __attribute__((packed));
+
 #pragma pack(pop)
         }
     }

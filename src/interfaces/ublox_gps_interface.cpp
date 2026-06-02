@@ -100,6 +100,14 @@ namespace xbot {
                 // data = no header bytes (starts with class) and stops before checksum
 
                 uint16_t packet_id = data[0] << 8 | data[1];
+
+                // Request UBX-NAV-SAT once after the receiver is known to be connected.
+                // This is a temporary output configuration and does not persistently change the receiver.
+                if (satellite_callback && !nav_sat_config_sent_) {
+                    request_nav_sat_output();
+                    nav_sat_config_sent_ = true;
+                }
+
                 switch (packet_id) {
                     case xbot::driver::gps::UbxNavPvt::CLASS_ID << 8 | xbot::driver::gps::UbxNavPvt::MESSAGE_ID: {
                         // substract class, id and length
@@ -109,6 +117,10 @@ namespace xbot {
                         } else {
                             log("size mismatch for PVT message!", WARN);
                         }
+                    }
+                        break;
+                    case xbot::driver::gps::UbxNavSatHeader::CLASS_ID << 8 | xbot::driver::gps::UbxNavSatHeader::MESSAGE_ID: {
+                        handle_nav_sat(header_stamp, data + 4, size - 4);
                     }
                         break;
 /*                    case 0x10 << 8 | 0x03: {
@@ -267,6 +279,7 @@ namespace xbot {
 
             UbxGpsInterface::UbxGpsInterface() : GpsInterface() {
                 wheel_latency_callback = nullptr;
+                nav_sat_config_sent_ = false;
             }
 
 
@@ -307,6 +320,72 @@ namespace xbot {
                     ck_a += packet[i];
                     ck_b += ck_a;
                 }
+            }
+
+
+            void UbxGpsInterface::request_nav_sat_output() {
+                // UBX-CFG-MSG, payload length 8:
+                // msgClass, msgID, rateDDC, rateUART1, rateUART2, rateUSB, rateSPI, reserved.
+                // Enable UBX-NAV-SAT (class 0x01, id 0x35) at 1 Hz on all common ports.
+                uint8_t frame[8 + 8] = {0};
+                frame[2] = 0x06;
+                frame[3] = 0x01;
+                uint8_t *payload = frame + 6;
+                payload[0] = UbxNavSatHeader::CLASS_ID;
+                payload[1] = UbxNavSatHeader::MESSAGE_ID;
+                payload[2] = 1; // DDC/I2C
+                payload[3] = 1; // UART1
+                payload[4] = 1; // UART2
+                payload[5] = 1; // USB
+                payload[6] = 1; // SPI
+                payload[7] = 0;
+                send_packet(frame, sizeof(frame));
+                log("requested UBX-NAV-SAT output for satellite diagnostics", INFO);
+            }
+
+            void UbxGpsInterface::handle_nav_sat(const std::chrono::time_point<std::chrono::steady_clock> &header_stamp,
+                                                 const uint8_t *payload, size_t payload_size) {
+                if (!satellite_callback) {
+                    return;
+                }
+
+                if (payload_size < sizeof(UbxNavSatHeader)) {
+                    log("size mismatch for NAV-SAT message header", WARN);
+                    return;
+                }
+
+                const auto *header = reinterpret_cast<const UbxNavSatHeader *>(payload);
+                const size_t expected_size = sizeof(UbxNavSatHeader) +
+                                             static_cast<size_t>(header->numSvs) * sizeof(UbxNavSatSv);
+                if (payload_size < expected_size) {
+                    log("size mismatch for NAV-SAT message payload", WARN);
+                    return;
+                }
+
+                satellite_state_.sensor_time = header->iTOW;
+                satellite_state_.received_time = duration_cast<milliseconds>(header_stamp.time_since_epoch()).count();
+                satellite_state_.num_svs = header->numSvs;
+                satellite_state_.satellites.clear();
+                satellite_state_.satellites.reserve(header->numSvs);
+
+                const auto *sv = reinterpret_cast<const UbxNavSatSv *>(payload + sizeof(UbxNavSatHeader));
+                for (uint8_t i = 0; i < header->numSvs; i++) {
+                    SatelliteInfo info{};
+                    info.gnss_id = sv[i].gnssId;
+                    info.sv_id = sv[i].svId;
+                    info.used = (sv[i].flags & 0x00000008u) != 0;
+                    info.cno = sv[i].cno;
+                    info.elev = sv[i].elev;
+                    info.azim = sv[i].azim;
+                    info.pr_res = sv[i].prRes;
+                    // UBX-NAV-SAT flags: qualityInd is bits 0..2, svUsed is bit 3.
+                    // Keep raw flags as well so the value can be reinterpreted if needed for a specific firmware.
+                    info.quality_ind = static_cast<uint8_t>(sv[i].flags & 0x07u);
+                    info.flags = sv[i].flags;
+                    satellite_state_.satellites.push_back(info);
+                }
+
+                satellite_callback(satellite_state_);
             }
 
             void UbxGpsInterface::handle_esf_meas(const std::chrono::time_point<std::chrono::steady_clock> &header_stamp,
@@ -420,6 +499,7 @@ namespace xbot {
             void UbxGpsInterface::reset_parser_state() {
                 found_header_ = false;
                 imu_fields_valid_ = 0;
+                nav_sat_config_sent_ = false;
             }
 
 

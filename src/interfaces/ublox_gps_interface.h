@@ -72,6 +72,11 @@ namespace xbot {
                 void handle_nav_pvt(const std::chrono::time_point<std::chrono::steady_clock> &header_stamp,
                                     const UbxNavPvt *msg);
 
+                void handle_nav_sat(const std::chrono::time_point<std::chrono::steady_clock> &header_stamp,
+                                    const uint8_t *payload, size_t payload_size);
+
+                void request_nav_sat_output();
+
                 void handle_esf_meas(const std::chrono::time_point<std::chrono::steady_clock> &header_stamp,
                                      const uint8_t *payload, size_t payload_sie);
 
@@ -80,6 +85,7 @@ namespace xbot {
                 // track if we have filled all values
                 uint8_t imu_fields_valid_;
                 uint32_t gps_state_iTOW_;
+                bool nav_sat_config_sent_;
 
 
                 // flag if we found the header for time tracking only

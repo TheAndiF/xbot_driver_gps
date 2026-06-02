@@ -85,3 +85,8 @@ add_dependencies(driver_gps_node ${catkin_EXPORTED_TARGETS} ${${PROJECT_NAME}_EX
 add_dependencies(driver_gps_node ${EP_NEMATODE})
 ExternalProject_Get_property(${EP_NEMATODE} BINARY_DIR)
 target_link_libraries(driver_gps_node ${catkin_LIBRARIES} ${GeographicLib_LIBRARIES} ${BINARY_DIR}/libNemaTode.a)
+
+catkin_install_python(PROGRAMS
+        scripts/gps_satellite_list.py
+        DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
