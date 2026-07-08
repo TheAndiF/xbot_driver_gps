@@ -34,6 +34,13 @@ namespace xbot {
                 send_wheel_ticks(uint32_t timestamp, bool direction_left, uint32_t ticks_left, bool direction_right,
                                  uint32_t ticks_right);
 
+                /**
+                 * Send UBX-CFG-RST to restart the u-blox receiver.
+                 * nav_bbr_mask selects hot/warm/cold start data handling.
+                 * reset_mode selects the receiver restart mode.
+                 */
+                bool send_cfg_rst(uint16_t nav_bbr_mask, uint8_t reset_mode);
+
             private:
 
 

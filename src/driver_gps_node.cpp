@@ -16,6 +16,7 @@
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 #include "std_msgs/UInt32.h"
+#include "std_msgs/String.h"
 #include "sensor_msgs/Imu.h"
 #include "rtcm_msgs/Message.h"
 #include <nmeaparse/nmea.h>
@@ -25,6 +26,8 @@
 #include <boost/date_time/posix_time/posix_time_io.hpp>
 #include <algorithm>
 #include <cctype>
+#include <iomanip>
+#include <sstream>
 
 using namespace xbot::driver::gps;
 using namespace nmea;
@@ -37,6 +40,7 @@ ros::Publisher latency_pub3;
 ros::Publisher imu_pub;
 ros::Publisher vrs_nmea_pub;
 ros::Publisher satellites_pub;
+ros::Publisher restart_status_pub;
 
 bool isUbxInterface = false;
 GpsInterface *gpsInterface;
@@ -129,6 +133,150 @@ void wheel_tick_received(const xbot_msgs::WheelTick::ConstPtr &msg) {
 
 void rtcm_received(const rtcm_msgs::Message::ConstPtr &rtcm) {
     gpsInterface->send_rtcm(rtcm->message.data(), rtcm->message.size());
+}
+
+std::string normalize_restart_token(std::string value) {
+    value.erase(value.begin(), std::find_if(value.begin(), value.end(), [](unsigned char c) {
+        return !std::isspace(c);
+    }));
+    value.erase(std::find_if(value.rbegin(), value.rend(), [](unsigned char c) {
+        return !std::isspace(c);
+    }).base(), value.end());
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        if (c == '-' || c == ' ') return '_';
+        return static_cast<char>(std::tolower(c));
+    });
+    return value;
+}
+
+std::string json_escape(const std::string &value) {
+    std::ostringstream out;
+    for (const char c : value) {
+        switch (c) {
+            case '"': out << "\\\""; break;
+            case '\\': out << "\\\\"; break;
+            case '\b': out << "\\b"; break;
+            case '\f': out << "\\f"; break;
+            case '\n': out << "\\n"; break;
+            case '\r': out << "\\r"; break;
+            case '\t': out << "\\t"; break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    out << "\\u" << std::hex << std::setw(4) << std::setfill('0') << static_cast<int>(c);
+                } else {
+                    out << c;
+                }
+                break;
+        }
+    }
+    return out.str();
+}
+
+void publish_restart_status(bool accepted,
+                            const std::string &status,
+                            const std::string &mode,
+                            const std::string &reset_mode,
+                            uint16_t nav_bbr_mask,
+                            uint8_t reset_mode_value,
+                            const std::string &reason = std::string()) {
+    std_msgs::String msg;
+    std::ostringstream payload;
+    payload << "{"
+            << "\"accepted\":" << (accepted ? "true" : "false") << ","
+            << "\"status\":\"" << json_escape(status) << "\","
+            << "\"source\":\"xbot_driver_gps\","
+            << "\"mode\":\"" << json_escape(mode) << "\","
+            << "\"reset_mode\":\"" << json_escape(reset_mode) << "\","
+            << "\"nav_bbr_mask\":" << static_cast<unsigned int>(nav_bbr_mask) << ","
+            << "\"reset_mode_value\":" << static_cast<unsigned int>(reset_mode_value) << ","
+            << "\"stamp\":" << std::fixed << std::setprecision(3) << ros::Time::now().toSec();
+    if (!reason.empty()) {
+        payload << ",\"reason\":\"" << json_escape(reason) << "\"";
+    }
+    payload << "}";
+    msg.data = payload.str();
+    restart_status_pub.publish(msg);
+}
+
+bool parse_f9p_restart_command(const std::string &raw_command,
+                               std::string &mode,
+                               std::string &reset_mode,
+                               uint16_t &nav_bbr_mask,
+                               uint8_t &reset_mode_value,
+                               std::string &reason) {
+    const std::size_t sep = raw_command.find(':');
+    mode = normalize_restart_token(sep == std::string::npos ? raw_command : raw_command.substr(0, sep));
+    reset_mode = normalize_restart_token(sep == std::string::npos ? std::string("controlled_software")
+                                                                  : raw_command.substr(sep + 1));
+
+    if (mode == "hot" || mode == "hot_start") {
+        mode = "hot_start";
+        nav_bbr_mask = 0x0000;
+    } else if (mode == "warm" || mode == "warm_start") {
+        mode = "warm_start";
+        nav_bbr_mask = 0x0001;
+    } else if (mode == "cold" || mode == "cold_start") {
+        mode = "cold_start";
+        nav_bbr_mask = 0xffff;
+    } else {
+        reason = "unknown restart mode; allowed: hot_start, warm_start, cold_start";
+        return false;
+    }
+
+    if (reset_mode.empty() || reset_mode == "default" || reset_mode == "controlled" ||
+        reset_mode == "software" || reset_mode == "controlled_software") {
+        reset_mode = "controlled_software";
+        reset_mode_value = 0x01;
+    } else if (reset_mode == "gnss" || reset_mode == "gnss_only" || reset_mode == "gnss_tasks") {
+        reset_mode = "gnss_only";
+        reset_mode_value = 0x02;
+    } else if (reset_mode == "hardware" || reset_mode == "watchdog" || reset_mode == "hardware_watchdog") {
+        reset_mode = "hardware_watchdog";
+        reset_mode_value = 0x00;
+    } else {
+        reason = "unknown reset_mode; allowed: controlled_software, gnss_only, hardware_watchdog";
+        return false;
+    }
+    return true;
+}
+
+void gps_restart_request_received(const std_msgs::String::ConstPtr &msg) {
+    if (!isUbxInterface) {
+        publish_restart_status(false, "rejected", "", "", 0, 0, "gps_driver_is_not_running_in_ubx_mode");
+        ROS_WARN_STREAM("Ignoring F9P restart request because GPS driver is not in UBX mode.");
+        return;
+    }
+
+    std::string mode;
+    std::string reset_mode;
+    uint16_t nav_bbr_mask = 0;
+    uint8_t reset_mode_value = 0;
+    std::string reason;
+    if (!parse_f9p_restart_command(msg->data, mode, reset_mode, nav_bbr_mask, reset_mode_value, reason)) {
+        publish_restart_status(false, "rejected", mode, reset_mode, nav_bbr_mask, reset_mode_value, reason);
+        ROS_WARN_STREAM("Rejected F9P restart request '" << msg->data << "': " << reason);
+        return;
+    }
+
+    auto *ubx = dynamic_cast<UbxGpsInterface *>(gpsInterface);
+    if (ubx == nullptr) {
+        publish_restart_status(false, "rejected", mode, reset_mode, nav_bbr_mask, reset_mode_value,
+                               "ubx_interface_unavailable");
+        ROS_WARN_STREAM("Unable to send F9P restart because UBX interface is unavailable.");
+        return;
+    }
+
+    const bool sent = ubx->send_cfg_rst(nav_bbr_mask, reset_mode_value);
+    if (sent) {
+        publish_restart_status(true, "sent", mode, reset_mode, nav_bbr_mask, reset_mode_value,
+                               "ubx_cfg_rst_sent_no_ack_expected");
+        ROS_WARN_STREAM("Sent UBX-CFG-RST F9P restart request: mode=" << mode
+                        << ", reset_mode=" << reset_mode);
+    } else {
+        publish_restart_status(false, "send_failed", mode, reset_mode, nav_bbr_mask, reset_mode_value,
+                               "gps_device_write_failed");
+        ROS_WARN_STREAM("Failed to write UBX-CFG-RST F9P restart request to GPS device.");
+    }
 }
 
 void convert_gps_result(const GpsInterface::GpsState &state, xbot_msgs::AbsolutePose &result) {
@@ -307,6 +455,7 @@ int main(int argc, char **argv) {
     if(chosen_protocol == "UBX") {
         ROS_INFO_STREAM("Using UBX mode for GPS");
         gpsInterface = new UbxGpsInterface();
+        isUbxInterface = true;
     } else if (chosen_protocol == "NMEA") {
         ROS_INFO_STREAM("Using NMEA mode for GPS");
         gpsInterface = new NmeaGpsInterface();
@@ -379,6 +528,10 @@ int main(int argc, char **argv) {
         gpsInterface->set_satellite_callback(satellite_state_received);
         ROS_INFO_STREAM("GPS satellite diagnostics enabled on private topic '~satellites'");
     }
+
+    restart_status_pub = paramNh.advertise<std_msgs::String>("restart_status", 10, true);
+    ros::Subscriber restart_request_sub = paramNh.subscribe("restart_request", 10, gps_restart_request_received,
+                                                           ros::TransportHints().tcpNoDelay(true));
 
     gpsInterface->set_state_callback(gps_state_received);
 

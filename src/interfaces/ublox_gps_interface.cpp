@@ -26,6 +26,17 @@ namespace xbot {
                 return send_raw(frame, size);
             }
 
+            bool UbxGpsInterface::send_cfg_rst(uint16_t nav_bbr_mask, uint8_t reset_mode) {
+                uint8_t frame[12] = {0};
+                frame[2] = 0x06;  // UBX-CFG
+                frame[3] = 0x04;  // UBX-CFG-RST
+                frame[6] = static_cast<uint8_t>(nav_bbr_mask & 0xff);
+                frame[7] = static_cast<uint8_t>((nav_bbr_mask >> 8) & 0xff);
+                frame[8] = reset_mode;
+                frame[9] = 0x00;  // reserved
+                return send_packet(frame, sizeof(frame));
+            }
+
 
             /**
              * parses the buffer and returns how many more bytes to read

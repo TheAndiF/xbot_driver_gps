@@ -63,3 +63,22 @@ TODO
 
 ## Improvements
 - Replace the deque - vector copy. Since we won't buffer anything anyways, we can just write into a vactor directly and reset it after each packet.
+## UBX-CFG-RST restart request
+
+The driver accepts restart requests on the private ROS topic `~restart_request` and publishes the result on `~restart_status`. In OpenMower these topics are remapped to `/ll/position/gps/restart_request` and `/ll/position/gps/restart_status`, and xbot_monitoring exposes them through MQTT below `gps_state`.
+
+The request payload is a `std_msgs/String` in the form `<mode>:<reset_mode>`.
+
+Supported modes:
+
+- `hot_start` -> `navBbrMask=0x0000`
+- `warm_start` -> `navBbrMask=0x0001`
+- `cold_start` -> `navBbrMask=0xffff`
+
+Supported reset modes:
+
+- `controlled_software` -> `resetMode=0x01`
+- `gnss_only` -> `resetMode=0x02`
+- `hardware_watchdog` -> `resetMode=0x00`
+
+The driver sends UBX-CFG-RST directly through the existing UBX device path. It does not wait for an ACK because the receiver can reset before an acknowledgement is returned.

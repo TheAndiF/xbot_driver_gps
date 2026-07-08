@@ -7,6 +7,7 @@ find_package(catkin REQUIRED COMPONENTS
         geometry_msgs
         xbot_msgs
         roscpp
+        std_msgs
         serial
         robot_localization
         tf2_geometry_msgs
