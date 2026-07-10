@@ -74,6 +74,19 @@ namespace xbot {
                     RTKType rtk_type;
                 };
 
+                struct FixStatus {
+                    uint32_t sensor_time;
+                    uint32_t received_time;
+
+                    bool gnss_fix_ok;
+                    bool invalid_llh;
+                    bool position_valid;
+                    double position_accuracy;
+
+                    GpsState::FixType fix_type;
+                    GpsState::RTKType rtk_type;
+                };
+
                 struct ImuState {
                     uint32_t sensor_time;
                     uint32_t received_time;
@@ -109,6 +122,7 @@ namespace xbot {
                 };
 
                 typedef std::function<void(const GpsState &new_state)> StateCallback;
+                typedef std::function<void(const FixStatus &new_status)> FixStatusCallback;
                 typedef std::function<void(const ImuState &new_state)> ImuCallback;
                 typedef std::function<void(const SatelliteState &new_state)> SatelliteCallback;
 
@@ -118,6 +132,7 @@ namespace xbot {
                 void set_device(GpsDevice *device);
                 void set_imu_callback(const GpsInterface::ImuCallback &function);
                 void set_state_callback(const GpsInterface::StateCallback &function);
+                void set_fix_status_callback(const GpsInterface::FixStatusCallback &function);
                 void set_satellite_callback(const GpsInterface::SatelliteCallback &function);
                 void set_log_function(const LogFunction &function);
 
@@ -134,6 +149,7 @@ namespace xbot {
 
             protected:
                 StateCallback state_callback = nullptr;
+                FixStatusCallback fix_status_callback = nullptr;
                 ImuCallback imu_callback = nullptr;
                 SatelliteCallback satellite_callback = nullptr;
                 LogFunction log = nullptr;

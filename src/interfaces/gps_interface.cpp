@@ -3,6 +3,7 @@
 //
 
 #include "gps_interface.h"
+#include <cmath>
 
 using namespace std::chrono;
 
@@ -22,6 +23,10 @@ namespace xbot {
                 state_callback = function;
             }
 
+            void GpsInterface::set_fix_status_callback(const GpsInterface::FixStatusCallback &function) {
+                fix_status_callback = function;
+            }
+
 
             void GpsInterface::set_imu_callback(const GpsInterface::ImuCallback &function) {
                 imu_callback = function;
@@ -34,6 +39,7 @@ namespace xbot {
             GpsInterface::GpsInterface() {
                 datum_n_ = datum_e_ = datum_u_ = NAN;
                 state_callback = nullptr;
+                fix_status_callback = nullptr;
                 imu_callback = nullptr;
                 satellite_callback = nullptr;
                 read_from_file_ = false;

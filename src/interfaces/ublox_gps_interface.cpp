@@ -5,6 +5,8 @@
 
 #include "ublox_gps_interface.h"
 
+#include <cmath>
+
 using namespace std::chrono;
 
 namespace xbot {
@@ -149,20 +151,64 @@ namespace xbot {
             }
 
             void UbxGpsInterface::handle_nav_pvt(const time_point<steady_clock> &header_stamp, const UbxNavPvt *msg) {
-                // We have received a nav pvt message, copy to GPS state
-                // check, if message is even roughly valid. If not - ignore it.
-                bool gnssFixOK = (msg->flags & 0b0000001);
-                bool invalidLlh = (msg->flags3 & 0b1);
+                // Decode the solution state first. The diagnostic callback is invoked for every
+                // UBX-NAV-PVT message, including messages that are not suitable as a position update.
+                const bool gnssFixOK = (msg->flags & 0b0000001) != 0;
+                const bool invalidLlh = (msg->flags3 & 0b1) != 0;
 
+                GpsState::FixType fix_type = GpsState::FixType::NO_FIX;
+                switch (msg->fixType) {
+                    case 1:
+                        fix_type = GpsState::FixType::DR_ONLY;
+                        break;
+                    case 2:
+                        fix_type = GpsState::FixType::FIX_2D;
+                        break;
+                    case 3:
+                        fix_type = GpsState::FixType::FIX_3D;
+                        break;
+                    case 4:
+                        fix_type = GpsState::FixType::GNSS_DR_COMBINED;
+                        break;
+                    default:
+                        fix_type = GpsState::FixType::NO_FIX;
+                        break;
+                }
 
+                GpsState::RTKType rtk_type = GpsState::RTK_NONE;
+                const bool diffSoln = (msg->flags & 0b0000010) != 0;
+                const auto carrSoln = static_cast<uint8_t>((msg->flags & 0b11000000) >> 6);
+                if (diffSoln) {
+                    if (carrSoln == 1) {
+                        rtk_type = GpsState::RTK_FLOAT;
+                    } else if (carrSoln == 2) {
+                        rtk_type = GpsState::RTK_FIX;
+                    }
+                }
+
+                FixStatus fix_status = {0};
+                fix_status.sensor_time = msg->iTOW;
+                fix_status.received_time = duration_cast<milliseconds>(header_stamp.time_since_epoch()).count();
+                fix_status.gnss_fix_ok = gnssFixOK;
+                fix_status.invalid_llh = invalidLlh;
+                fix_status.position_valid = gnssFixOK && !invalidLlh && fix_type != GpsState::FixType::NO_FIX;
+                fix_status.position_accuracy = static_cast<double>(msg->hAcc) / 1000.0;
+                fix_status.fix_type = fix_type;
+                fix_status.rtk_type = rtk_type;
+                if (fix_status_callback) {
+                    fix_status_callback(fix_status);
+                }
+
+                // Keep the established safety behaviour: invalid positions are not published on
+                // the AbsolutePose topic, but their receiver status remains available diagnostically.
                 if (!gnssFixOK) {
                     gps_state_valid_ = false;
-                    log("invalid gnssFix - dropping message", WARN);
+                    log("invalid gnssFix - dropping position message", WARN);
                     return;
                 }
                 if (invalidLlh) {
                     gps_state_valid_ = false;
-                    log("invalid lat, lon, height - dropping message", WARN);
+                    log("invalid lat, lon, height - dropping position message", WARN);
                     return;
                 }
 
@@ -182,42 +228,8 @@ namespace xbot {
                     }
                 }
 
-                switch (msg->fixType) {
-                    case 1:
-                        gps_state_.fix_type = GpsState::FixType::DR_ONLY;
-                        break;
-                    case 2:
-                        gps_state_.fix_type = GpsState::FixType::FIX_2D;
-                        break;
-                    case 3:
-                        gps_state_.fix_type = GpsState::FixType::FIX_3D;
-                        break;
-                    case 4:
-                        gps_state_.fix_type = GpsState::FixType::GNSS_DR_COMBINED;
-                        break;
-                    default:
-                        gps_state_.fix_type = GpsState::FixType::NO_FIX;
-                        break;
-                }
-
-
-                bool diffSoln = (msg->flags & 0b0000010) >> 1;
-                auto carrSoln = (uint8_t) ((msg->flags & 0b11000000) >> 6);
-                if (diffSoln) {
-                    switch (carrSoln) {
-                        case 1:
-                            gps_state_.rtk_type = GpsState::RTK_FLOAT;
-                            break;
-                        case 2:
-                            gps_state_.rtk_type = GpsState::RTK_FIX;
-                            break;
-                        default:
-                            gps_state_.rtk_type = GpsState::RTK_NONE;
-                            break;
-                    }
-                } else {
-                    gps_state_.rtk_type = GpsState::RTK_NONE;
-                }
+                gps_state_.fix_type = fix_type;
+                gps_state_.rtk_type = rtk_type;
 
 
 

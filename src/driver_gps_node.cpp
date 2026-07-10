@@ -41,6 +41,7 @@ ros::Publisher imu_pub;
 ros::Publisher vrs_nmea_pub;
 ros::Publisher satellites_pub;
 ros::Publisher restart_status_pub;
+ros::Publisher fix_status_pub;
 
 bool isUbxInterface = false;
 GpsInterface *gpsInterface;
@@ -277,6 +278,64 @@ void gps_restart_request_received(const std_msgs::String::ConstPtr &msg) {
                                "gps_device_write_failed");
         ROS_WARN_STREAM("Failed to write UBX-CFG-RST F9P restart request to GPS device.");
     }
+}
+
+std::string gps_fix_type_name(GpsInterface::GpsState::FixType fix_type) {
+    switch (fix_type) {
+        case GpsInterface::GpsState::DR_ONLY: return "dead_reckoning";
+        case GpsInterface::GpsState::FIX_2D: return "2d_fix";
+        case GpsInterface::GpsState::FIX_3D: return "3d_fix";
+        case GpsInterface::GpsState::GNSS_DR_COMBINED: return "gnss_dead_reckoning";
+        default: return "no_fix";
+    }
+}
+
+std::string gps_rtk_type_name(GpsInterface::GpsState::RTKType rtk_type) {
+    switch (rtk_type) {
+        case GpsInterface::GpsState::RTK_FLOAT: return "float";
+        case GpsInterface::GpsState::RTK_FIX: return "fixed";
+        default: return "none";
+    }
+}
+
+std::string gps_solution_state(const GpsInterface::FixStatus &status) {
+    if (!status.gnss_fix_ok || status.invalid_llh || !status.position_valid) {
+        return "no_fix";
+    }
+    if (status.rtk_type == GpsInterface::GpsState::RTK_FIX) {
+        return "fixed";
+    }
+    if (status.rtk_type == GpsInterface::GpsState::RTK_FLOAT) {
+        return "float";
+    }
+    if (status.fix_type == GpsInterface::GpsState::FIX_2D ||
+        status.fix_type == GpsInterface::GpsState::FIX_3D ||
+        status.fix_type == GpsInterface::GpsState::GNSS_DR_COMBINED) {
+        return "gps_fix";
+    }
+    return "no_fix";
+}
+
+void gps_fix_status_received(const GpsInterface::FixStatus &status) {
+    std_msgs::String msg;
+    std::ostringstream payload;
+    payload << "{"
+            << "\"source\":\"xbot_driver_gps\","
+            << "\"protocol\":\"UBX\","
+            << "\"solution_state\":\"" << gps_solution_state(status) << "\","
+            << "\"fix_type\":\"" << gps_fix_type_name(status.fix_type) << "\","
+            << "\"rtk_state\":\"" << gps_rtk_type_name(status.rtk_type) << "\","
+            << "\"gnss_fix_ok\":" << (status.gnss_fix_ok ? "true" : "false") << ","
+            << "\"invalid_llh\":" << (status.invalid_llh ? "true" : "false") << ","
+            << "\"position_valid\":" << (status.position_valid ? "true" : "false") << ","
+            << "\"position_accuracy_m\":" << std::fixed << std::setprecision(3)
+            << status.position_accuracy << ","
+            << "\"sensor_stamp\":" << status.sensor_time << ","
+            << "\"received_stamp\":" << status.received_time << ","
+            << "\"stamp\":" << std::fixed << std::setprecision(3) << ros::Time::now().toSec()
+            << "}";
+    msg.data = payload.str();
+    fix_status_pub.publish(msg);
 }
 
 void convert_gps_result(const GpsInterface::GpsState &state, xbot_msgs::AbsolutePose &result) {
@@ -530,10 +589,12 @@ int main(int argc, char **argv) {
     }
 
     restart_status_pub = paramNh.advertise<std_msgs::String>("restart_status", 10, true);
+    fix_status_pub = paramNh.advertise<std_msgs::String>("fix_status", 10, true);
     ros::Subscriber restart_request_sub = paramNh.subscribe("restart_request", 10, gps_restart_request_received,
                                                            ros::TransportHints().tcpNoDelay(true));
 
     gpsInterface->set_state_callback(gps_state_received);
+    gpsInterface->set_fix_status_callback(gps_fix_status_received);
 
     if (paramNh.param("publish_latency", true) && isUbxInterface) {
         latency_pub1 = paramNh.advertise<std_msgs::UInt32>("wheel_tick_stamp_esc", 100);
