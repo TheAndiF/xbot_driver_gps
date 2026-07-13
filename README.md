@@ -82,3 +82,9 @@ Supported reset modes:
 - `hardware_watchdog` -> `resetMode=0x00`
 
 The driver sends UBX-CFG-RST directly through the existing UBX device path. It does not wait for an ACK because the receiver can reset before an acknowledgement is returned.
+
+## Restart recovery and retained audit status
+
+After UBX-CFG-RST the driver invalidates its runtime receiver state and re-applies the volatile UBX-NAV-SAT output configuration as soon as the receiver sends data again. A restart is only reported as successful after both a new UBX-NAV-PVT and a new UBX-NAV-SAT message have been received. The recovery watchdog reports a failure after 15 seconds if either output is missing.
+
+The latched ROS restart status contains `restart_sequence`, `requested_at`, `completed_at`, `nav_pvt_received`, `nav_sat_received`, and `receiver_restart_confirmed`. xbot_monitoring forwards the live status retained to `gps_state/restart/status/json` and stores the last completed restart retained at `gps_state/restart/last/json`.

@@ -41,6 +41,9 @@ namespace xbot {
                  */
                 bool send_cfg_rst(uint16_t nav_bbr_mask, uint8_t reset_mode);
 
+                /** Prepare the running driver for receiver output reconfiguration after UBX-CFG-RST. */
+                void begin_restart_recovery();
+
             private:
 
 

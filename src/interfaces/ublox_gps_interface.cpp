@@ -28,6 +28,15 @@ namespace xbot {
                 return send_raw(frame, size);
             }
 
+            void UbxGpsInterface::begin_restart_recovery() {
+                // UBX-CFG-RST can remove the volatile CFG-MSG setting. Force the same
+                // NAV-SAT configuration handshake that is used after a normal connection.
+                nav_sat_config_sent_ = false;
+                gps_state_valid_ = false;
+                satellite_state_ = SatelliteState{};
+                log("prepared UBX receiver reconfiguration after restart", INFO);
+            }
+
             bool UbxGpsInterface::send_cfg_rst(uint16_t nav_bbr_mask, uint8_t reset_mode) {
                 uint8_t frame[12] = {0};
                 frame[2] = 0x06;  // UBX-CFG
