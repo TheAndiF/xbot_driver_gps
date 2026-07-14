@@ -268,8 +268,12 @@ bool parse_f9p_restart_command(const std::string &raw_command,
     } else if (reset_mode == "hardware" || reset_mode == "watchdog" || reset_mode == "hardware_watchdog") {
         reset_mode = "hardware_watchdog";
         reset_mode_value = 0x00;
+    } else if (reset_mode == "hardware_after_shutdown" || reset_mode == "hardware_shutdown" ||
+               reset_mode == "watchdog_after_shutdown" || reset_mode == "controlled_hardware") {
+        reset_mode = "hardware_after_shutdown";
+        reset_mode_value = 0x04;
     } else {
-        reason = "unknown reset_mode; allowed: controlled_software, gnss_only, hardware_watchdog";
+        reason = "unknown reset_mode; allowed: controlled_software, gnss_only, hardware_watchdog, hardware_after_shutdown";
         return false;
     }
     return true;

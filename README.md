@@ -80,6 +80,9 @@ Supported reset modes:
 - `controlled_software` -> `resetMode=0x01`
 - `gnss_only` -> `resetMode=0x02`
 - `hardware_watchdog` -> `resetMode=0x00`
+- `hardware_after_shutdown` -> `resetMode=0x04`
+
+`hardware_after_shutdown` performs an orderly receiver shutdown followed by an internal watchdog hardware reset. It is fully available through UBX and does not require the external `RESET_N` pin. External `RESET_N` and a true GPS power cycle remain unavailable on the current OpenMower mainboard because the reset pin is not connected and the GPS 5 V supply is not separately switchable.
 
 The driver sends UBX-CFG-RST directly through the existing UBX device path. It does not wait for an ACK because the receiver can reset before an acknowledgement is returned.
 
